@@ -1,7 +1,8 @@
 use jsonwebtoken::{EncodingKey, Header, encode, Algorithm};
 use serde::{Serialize, Deserialize};
-use crate::keys::KeyPair;
-use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
+use rsa::pkcs1::{EncodeRsaPrivateKey};
+use rsa::traits::PublicKeyParts;
+use rsa::{RsaPrivateKey, RsaPublicKey};
 
 #[derive(Serialize)]
 pub struct Jwk {
@@ -27,13 +28,12 @@ pub struct Claims {
   pub iss: String,
 }
 
-pub fn sign_jwt_with_private_pem(
-    pem: &str,
+pub fn sign_jwt_with_private_key(
+    private_key: &RsaPrivateKey,
     kid: &str,
     expires_at: chrono::DateTime<chrono::Utc>
 ) -> anyhow::Result<String> {
-    // Convert PEM to DER for jsonwebtoken v10
-    let private_key = rsa::RsaPrivateKey::from_pkcs1_pem(pem)?;
+    // Convert to DER for jsonwebtoken v10
     let der = private_key.to_pkcs1_der()?;
 
     // Grab encoding key and generate header
@@ -58,19 +58,24 @@ pub fn sign_jwt_with_private_pem(
     Ok(token)
 }
 
-pub fn build_jwks(keys: &[KeyPair]) -> Jwks {
-    let now = chrono::Utc::now();
+/// Build JWKS from a list of (kid, public_key) tuples
+pub fn build_jwks_from_keys(keys: &[(i64, RsaPublicKey)]) -> Jwks {
     let keys: Vec<Jwk> = keys
         .iter()
-        .filter(|k| k.expires_at > now)
-        .map(|k| Jwk {
-            kty: "RSA",
-            use_: "sig",
-            alg: k.alg.clone(),
-            kid: k.kid.clone(),
-            n: k.public_n_b64.clone(),
-            e: k.public_e_b64.clone(),
+        .map(|(kid, pub_key)| {
+            let n = base64_url::encode(&pub_key.n().to_bytes_be());
+            let e = base64_url::encode(&pub_key.e().to_bytes_be());
+
+            Jwk {
+                kty: "RSA",
+                use_: "sig",
+                alg: "RS256".to_string(),
+                kid: kid.to_string(),
+                n,
+                e
+            }
         })
         .collect();
+
     Jwks { keys }
 }
