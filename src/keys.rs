@@ -1,5 +1,5 @@
 use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1::{EncodeRsaPrivateKey}, traits::PublicKeyParts};
-use rand::rngs::OsRng;
+use rsa::rand_core::OsRng;
 use chrono::{Utc, Duration};
 use base64::{engine::general_purpose, Engine as _};
 use std::sync::{Arc, RwLock};

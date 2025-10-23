@@ -1,10 +1,12 @@
 use jsonwebtoken::{EncodingKey, Header, encode, Algorithm};
 use serde::{Serialize, Deserialize};
 use crate::keys::KeyPair;
+use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
 
 #[derive(Serialize)]
 pub struct Jwk {
     kty: &'static str,
+    #[serde(rename = "use")]
     use_: &'static str,
     alg: String,
     kid: String,
@@ -14,20 +16,28 @@ pub struct Jwk {
 
 #[derive(Serialize)]
 pub struct Jwks {
-    keys: Vec<Jwk>,
+    pub keys: Vec<Jwk>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
-  sub: String,
-  iat: usize,
-  exp: usize,
-  iss: String,
+  pub sub: String,
+  pub iat: usize,
+  pub exp: usize,
+  pub iss: String,
 }
 
-pub fn sign_jwt_with_private_pem(pem: &str, kid: &str, expires_at: chrono::DateTime<chrono::Utc>) -> anyhow::Result<String> {
+pub fn sign_jwt_with_private_pem(
+    pem: &str,
+    kid: &str,
+    expires_at: chrono::DateTime<chrono::Utc>
+) -> anyhow::Result<String> {
+    // Convert PEM to DER for jsonwebtoken v10
+    let private_key = rsa::RsaPrivateKey::from_pkcs1_pem(pem)?;
+    let der = private_key.to_pkcs1_der()?;
+
     // Grab encoding key and generate header
-    let encoding_key = EncodingKey::from_rsa_pem(pem.as_bytes())?;
+    let encoding_key = EncodingKey::from_rsa_der(der.as_bytes());
     let header = {
         let mut h = Header::new(Algorithm::RS256);
         h.kid = Some(kid.to_owned());

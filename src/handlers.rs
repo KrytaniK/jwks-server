@@ -1,74 +1,61 @@
-use actix_web::{web, HttpResponse, Responder, HttpRequest, route};
-use crate::keys::{KeyStore};
 use crate::jwks::{build_jwks, sign_jwt_with_private_pem};
+use crate::keys::KeyStore;
+use std::collections::HashMap;
+use std::sync::Arc;
+use warp::Filter;
 
-#[route("/.well-known/jwks.json", method = "GET")]
-async fn jwks_get_handler(store: web::Data<KeyStore>) -> impl Responder {
-    // Build an array of public keys that have not expired
-    let jwks = build_jwks(&store.all_keys());
-    HttpResponse::Ok().json(jwks)
+// JWKS GET handler
+pub fn jwks_handler (
+  key_store: Arc<KeyStore>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+  warp::path!(".well-known" / "jwks.json")
+    .and(warp::get())
+    .map(move || {
+      let jwks = build_jwks(&key_store.all_keys());
+      warp::reply::json(&jwks)
+    })
 }
 
-#[route("/.well-known/jwks.json", method = "POST")]
-async fn jwks_post_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "GET")).body("Method not allowed")
-}
+// Auth POST handler
+pub fn auth_handler(
+  key_store: Arc<KeyStore>,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+  warp::path("auth")
+    .and(warp::post())
+    .and(warp::query::<HashMap<String, String>>())
+    .map(move |params: HashMap<String, String>| {
+      // Check for expired query
+      let expired_query = params.get("expired").is_some();
 
-#[route("/.well-known/jwks.json", method = "PUT")]
-async fn jwks_put_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "GET")).body("Method not allowed")
-}
+       // Respond with an expired/unexpired key
+      let key = if expired_query {
+        key_store
+          .get_expired_key()
+          .or_else(|| key_store.any_key())
+      } else {
+        key_store
+          .get_unexpired_key()
+          .or_else(|| key_store.any_key())
+      };
 
-#[route("/.well-known/jwks.json", method = "DELETE")]
-async fn jwks_delete_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "GET")).body("Method not allowed")
-}
-
-#[route("/.well-known/jwks.json", method = "PATCH")]
-async fn jwks_patch_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "GET")).body("Method not allowed")
-}
-
-// Auth Handlers
-#[route("/auth", method = "POST")]
-async fn auth_post_handler(req: HttpRequest, store: web::Data<KeyStore>) -> impl Responder {
-    // Check for expired query
-    let expired_query = req.query_string().contains("expired");
-    
-    // Respond with an expired/unexpired key
-    let key = if expired_query {
-        store.get_expired_key().or_else(|| store.any_key())
-    } else {
-        store.get_unexpired_key().or_else(|| store.any_key())
-    };
-
-    // Sign the jwt with the private key and serve to the client
-    match key {
+      // Sign the jwt with the private key and serve to the client
+      match key {
         Some(k) => {
-            let token = sign_jwt_with_private_pem(&k.private_pem, &k.kid, k.expires_at)
-                .map_err(|e| HttpResponse::InternalServerError().body(format!("sign error: {}", e))).unwrap();
-            HttpResponse::Ok().json(serde_json::json!({ "token": token }))
+          match sign_jwt_with_private_pem(&k.private_pem, &k.kid, k.expires_at) {
+            Ok(token) => warp::reply::with_status(
+              token,
+              warp::http::StatusCode::OK,
+            ),
+            Err(_) => warp::reply::with_status(
+              "Token generation failed".to_string(),
+              warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+          }
         }
-        None => HttpResponse::InternalServerError().body("No key available"),
-    }
-}
-
-#[route("/auth", method = "GET")]
-async fn auth_get_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "POST")).body("Method not allowed")
-}
-
-#[route("/auth", method = "PUT")]
-async fn auth_put_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "POST")).body("Method not allowed")
-}
-
-#[route("/auth", method = "DELETE")]
-async fn auth_delete_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "POST")).body("Method not allowed")
-}
-
-#[route("/auth", method = "PATCH")]
-async fn auth_patch_handler() -> impl Responder {
-    HttpResponse::MethodNotAllowed().insert_header(("Allow", "POST")).body("Method not allowed")
+        None => warp::reply::with_status(
+          "No Key Available".to_string(),
+          warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+      }
+    })
 }
