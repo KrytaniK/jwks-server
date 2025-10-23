@@ -14,5 +14,8 @@ rsa = "0.9.8"
 rusqlite = "0.37.0"
 serde = "1.0.228"
 serde_json = "1.0.145"
-tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
-warp = { version = "0.4.2", features = ["default", "server"] }
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "full"] }
+warp = { version = "0.4.2", features = ["default", "server", "test"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"
